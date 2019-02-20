@@ -1,4 +1,9 @@
 '''
+
+CTH:
+
+Code taken from Kivy garden and adjusted to match ORCA requirements
+
 FileBrowser
 ===========
 
@@ -17,28 +22,28 @@ To create a FileBrowser which prints the currently selected file as well as
 the current text in the filename field when 'Select' is pressed, with
 a shortcut to the Documents directory added to the favorites bar::
 
-    import os
-    from kivy.app import App
+    ffrom kivy.app import App
+    from os.path import sep, expanduser, isdir, dirname
 
     class TestApp(App):
 
         def build(self):
-            user_path = os.path.join(get_home_directory(), 'Documents')
+            if platform == 'win':
+                user_path = dirname(expanduser('~')) + sep + 'Documents'
+            else:
+                user_path = expanduser('~') + sep + 'Documents'
             browser = FileBrowser(select_string='Select',
                                   favorites=[(user_path, 'Documents')])
-            browser.bind(on_success=self._fbrowser_success,
-                         on_canceled=self._fbrowser_canceled,
-                         on_submit=self._fbrowser_submit)
+            browser.bind(
+                        on_success=self._fbrowser_success,
+                        on_canceled=self._fbrowser_canceled)
             return browser
 
         def _fbrowser_canceled(self, instance):
-            print('cancelled, Close self.')
+            print 'cancelled, Close self.'
 
         def _fbrowser_success(self, instance):
-            print(instance.selection)
-
-        def _fbrowser_submit(self, instance):
-            print(instance.selection)
+            print instance.selection
 
     TestApp().run()
 
@@ -70,34 +75,21 @@ except:
 from kivy.properties import (ObjectProperty, StringProperty, OptionProperty,
                              ListProperty, BooleanProperty)
 from kivy.lang import Builder
-from kivy.utils import platform
+from kivy.utils import platform as core_platform
 from kivy.clock import Clock
-from kivy.compat import PY2
 import string
-from os.path import sep, dirname, expanduser, isdir, join
+from os.path import sep, dirname, expanduser, isdir
 from os import walk
-from sys import getfilesystemencoding
 from functools import partial
+from kivy.uix.widget import Widget
 
+platform = core_platform
 if platform == 'win':
     from ctypes import windll, create_unicode_buffer
 
-
-def get_home_directory():
-    if platform == 'win':
-        user_path = expanduser('~')
-
-        if not isdir(join(user_path, 'Desktop')):
-            user_path = dirname(user_path)
-
-    else:
-        user_path = expanduser('~')
-
-    if PY2:
-        user_path = user_path.decode(getfilesystemencoding())
-
-    return user_path
-
+class SettingSpacer(Widget):
+    # Internal class, not documented.
+    pass
 
 def get_drives():
     drives = []
@@ -119,13 +111,13 @@ def get_drives():
         places = (sep + u'mnt', sep + u'media')
         for place in places:
             if isdir(place):
-                for directory in next(walk(place))[1]:
+                for directory in walk(place).next()[1]:
                     drives.append((place + sep + directory, directory))
     elif platform == 'macosx' or platform == 'ios':
         drives.append((expanduser(u'~'), '~/'))
         vol = sep + u'Volume'
         if isdir(vol):
-            for drive in next(walk(vol))[1]:
+            for drive in walk(vol).next()[1]:
                 drives.append((vol + sep + drive, drive))
     return drives
 
@@ -139,9 +131,9 @@ Builder.load_string('''
 
 <TreeLabel>:
     on_touch_down:
-        self.parent.browser.current_tab.content.path = self.path if\
+        self.parent.browser.path = self.path if\
         self.collide_point(*args[1].pos) and self.path else\
-        self.parent.browser.current_tab.content.path
+        self.parent.browser.path
     on_is_open: self.is_open and self.parent.trigger_populate(self)
 
 <FileBrowser>:
@@ -155,6 +147,7 @@ Builder.load_string('''
     BoxLayout:
         orientation: 'horizontal'
         spacing: 5
+        id: box_left
         Splitter:
             sizable_from: 'right'
             min_size: '153sp'
@@ -163,26 +156,25 @@ Builder.load_string('''
             ScrollView:
                 LinkTree:
                     id: link_tree
-                    browser: tabbed_browser
+                    browser: list_view
                     size_hint_y: None
                     height: self.minimum_height
-                    on_parent: self.fill_tree(root.favorites)
-                    root_options: {'text': 'Locations', 'no_selection':True}
         BoxLayout:
+            id: box_right
             size_hint_x: .8
             orientation: 'vertical'
             Label:
                 size_hint_y: None
                 height: '22dp'
                 text_size: self.size
-                padding_x: '10dp'
+                padding_x: '-10dp'
                 text: abspath(root.path)
                 valign: 'middle'
-            TabbedPanel:
-                id: tabbed_browser
-                do_default_tab: False
-                TabbedPanelItem:
-                    text: 'List View'
+            ScreenManager:
+                id:sm
+                Screen:
+                    id: page_listview
+                    name: 'list_view'
                     FileChooserListView:
                         id: list_view
                         path: root.path
@@ -193,8 +185,9 @@ Builder.load_string('''
                         dirselect: root.dirselect
                         rootpath: root.rootpath
                         on_submit: root.dispatch('on_submit')
-                TabbedPanelItem:
-                    text: 'Icon View'
+                Screen:
+                    id: page_listview
+                    name: 'icon_view'
                     FileBrowserIconView:
                         id: icon_view
                         path: root.path
@@ -205,37 +198,59 @@ Builder.load_string('''
                         dirselect: root.dirselect
                         rootpath: root.rootpath
                         on_submit: root.dispatch('on_submit')
-    GridLayout:
+
+    SettingSpacer:
+        id: spacer1
+        height: 0
+
+    BoxLayout:
+        id: box_text
         size_hint: (1, None)
-        height: file_text.line_height * 4
-        cols: 2
-        rows: 2
-        spacing: [5]
+        height: (file_text.line_height * 4) if (root.show_fileinput and root.show_filterinput) else (file_text.line_height * 2)
+        spacing: '5dp'
+        orientation: 'vertical'
         TextInput:
             id: file_text
             text: (root.selection and (root._shorten_filenames(\
             root.selection) if root.multiselect else root.selection[0])) or ''
             hint_text: 'Filename'
             multiline: False
-        Button:
-            id: select_button
-            size_hint_x: None
-            width: metrics.dp(100)
-            text: root.select_string
-            on_release: root.dispatch('on_success')
         TextInput:
             id: filt_text
             hint_text: '*.*'
             on_text_validate:
                 root.filters = self.text.split(',') if self.text else []
             multiline: False
-            text: ','.join([filt for filt in root.filters if isinstance(filt, str)])
+            text: ','.join(root.filters)
+
+    SettingSpacer:
+        id: spacer2
+        height: 0
+
+    BoxLayout:
+        size_hint: (1, None)
+        height: metrics.dp(40)
+        spacing: '2dp'
+        Button:
+            id: select_button
+            text: root.select_string
+            on_release: root.dispatch('on_success')
         Button:
             id: cancel_button
-            size_hint_x: None
-            width: metrics.dp(100)
             text: root.cancel_string
             on_release: root.dispatch('on_canceled')
+        Button:
+            id: showlistview_button
+            text: root.listview_string
+            on_release:
+                link_tree.browser = list_view
+                sm.current='list_view'
+        Button:
+            id: showiconview_button
+            text: root.iconview_string
+            on_release:
+                link_tree.browser = icon_view
+                sm.current='icon_view'
 
 ''')
 
@@ -253,20 +268,31 @@ class LinkTree(TreeView):
     _favs = ObjectProperty(None)
     _computer_node = None
 
+    favorites_string = StringProperty('')
+    libraries_string = StringProperty('')
+    computer_string = StringProperty('')
+
     def fill_tree(self, fav_list):
-        user_path = get_home_directory()
-        self._favs = self.add_node(TreeLabel(text='Favorites', is_open=True,
+        if platform == 'win':
+            user_path = expanduser(u'~')
+            if not isdir(user_path + sep + 'Desktop'):
+                user_path = dirname(user_path) + sep
+            else:
+                user_path += sep
+        else:
+            user_path = expanduser(u'~') + sep
+        self._favs = self.add_node(TreeLabel(text=self.favorites_string, is_open=True,
                                              no_selection=True))
         self.reload_favs(fav_list)
 
-        libs = self.add_node(TreeLabel(text='Libraries', is_open=True,
+        libs = self.add_node(TreeLabel(text=self.libraries_string, is_open=True,
                                        no_selection=True))
         places = ('Documents', 'Music', 'Pictures', 'Videos')
         for place in places:
-            if isdir(join(user_path, place)):
-                self.add_node(TreeLabel(text=place, path=join(user_path,
-                                        place)), libs)
-        self._computer_node = self.add_node(TreeLabel(text='Computer',\
+            if isdir(user_path + place):
+                self.add_node(TreeLabel(text=place, path=user_path +
+                                        place), libs)
+        self._computer_node = self.add_node(TreeLabel(text=self.computer_string,\
         is_open=True, no_selection=True))
         self._computer_node.bind(on_touch_down=self._drives_touch)
         self.reload_drives()
@@ -297,7 +323,14 @@ class LinkTree(TreeView):
                               self._computer_node)
 
     def reload_favs(self, fav_list):
-        user_path = get_home_directory()
+        if platform == 'win':
+            user_path = expanduser(u'~')
+            if not isdir(user_path + sep + 'Desktop'):
+                user_path = dirname(user_path) + sep
+            else:
+                user_path += sep
+        else:
+            user_path = expanduser('~') + sep
         favs = self._favs
         remove = []
         for node in self.iterate_all_nodes(favs):
@@ -307,9 +340,9 @@ class LinkTree(TreeView):
             self.remove_node(node)
         places = ('Desktop', 'Downloads')
         for place in places:
-            if isdir(join(user_path, place)):
-                self.add_node(TreeLabel(text=place, path=join(user_path,
-                                        place)), favs)
+            if isdir(user_path + place):
+                self.add_node(TreeLabel(text=place, path=user_path +
+                                        place), favs)
         for path, name in fav_list:
             if isdir(path):
                 self.add_node(TreeLabel(text=name, path=path), favs)
@@ -318,9 +351,9 @@ class LinkTree(TreeView):
         if not node.path or node.nodes:
             return
         parent = node.path
-        _next = next(walk(parent))
-        if _next:
-            for path in _next[1]:
+        next = walk(parent).next()
+        if next:
+            for path in next[1]:
                 self.add_node(TreeLabel(text=path, path=parent + sep + path),
                               node)
 
@@ -359,6 +392,48 @@ class FileBrowser(BoxLayout):
 
     :data:`cancel_string` is an :class:`~kivy.properties.StringProperty`,
     defaults to 'Cancel'.
+    '''
+
+    listview_string = StringProperty('List View')
+    '''Label of the 'list view' button.
+
+    :data:`listview_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'List View'.
+    '''
+
+    iconview_string = StringProperty('Icon View')
+    '''Label of the 'icon view' button.
+
+    :data:`iconview_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'Icon View'.
+    '''
+
+    favorites_string = StringProperty('Favorites')
+    '''Label of the 'Favorites' Section
+
+    :data:`favorites_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'Favorites'.
+    '''
+
+    libraries_string = StringProperty('Libraries')
+    '''Label of the 'Libraries' Section
+
+    :data:`libraries_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'Libraries'.
+    '''
+
+    computer_string = StringProperty('Computer')
+    '''Label of the 'Computer' Section
+
+    :data:`computer_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'Computer'.
+    '''
+
+    location_string = StringProperty('Locations')
+    '''Label of the 'Locations' Section
+
+    :data:`Locations_string` is an :class:`~kivy.properties.StringProperty`,
+    defaults to 'Locations'.
     '''
 
     filename = StringProperty('')
@@ -421,6 +496,23 @@ class FileBrowser(BoxLayout):
     .. versionadded:: 1.1
     '''
 
+    show_fileinput = BooleanProperty(True)
+    '''
+    :class:`~kivy.properties.BooleanProperty`, defaults to True.
+    Determines whether the file name input field should be shown.
+
+    .. versionadded:: 1.2
+    '''
+
+    show_filterinput = BooleanProperty(True)
+    '''
+    :class:`~kivy.properties.BooleanProperty`, defaults to True.
+    Determines whether the filter input filed should be shown.
+
+    .. versionadded:: 1.2
+    '''
+
+
     multiselect = BooleanProperty(False)
     '''
     :class:`~kivy.properties.BooleanProperty`, defaults to False.
@@ -463,6 +555,15 @@ class FileBrowser(BoxLayout):
     defaults to '[]'.
     '''
 
+    transition = ObjectProperty(None)
+    '''
+    :class:`~kivy.propertiesObjectProperty`, defaults to False.
+    sets the transition type between icon view and list view
+    If not set, the screenmananager default transition is used (slide)
+    .. versionadded:: 1.2
+    '''
+
+
     def on_success(self):
         pass
 
@@ -494,6 +595,23 @@ class FileBrowser(BoxLayout):
                                 dirselect=partial(self._attr_callback, 'dirselect'),
                                 rootpath=partial(self._attr_callback, 'rootpath'))
 
+        if not self.show_fileinput:
+            self.ids.box_text.remove_widget(self.ids.file_text)
+        if not self.show_filterinput:
+            self.ids.box_text.remove_widget(self.ids.filt_text)
+        if (not self.show_fileinput) and (not self.show_filterinput):
+            self.remove_widget(self.ids.spacer1)
+            self.remove_widget(self.ids.box_text)
+
+        self.ids.link_tree.libraries_string = self.libraries_string
+        self.ids.link_tree.favorites_string = self.favorites_string
+        self.ids.link_tree.computer_string = self.computer_string
+        self.ids.link_tree.fill_tree(self.favorites)
+        self.ids.link_tree.root_options= {'text': self.location_string, 'no_selection':True}
+
+        if self.transition:
+            self.ids.sm.transition=self.transition
+
     def _shorten_filenames(self, filenames):
         if not len(filenames):
             return ''
@@ -508,18 +626,24 @@ class FileBrowser(BoxLayout):
         setattr(self, attr, getattr(obj, attr))
 
 if __name__ == '__main__':
-    import os
     from kivy.app import App
+    from os.path import sep, expanduser, isdir, dirname
 
     class TestApp(App):
 
         def build(self):
-            user_path = os.path.join(get_home_directory(), 'Documents')
+            if platform == 'win':
+                user_path = expanduser('~')
+                if not isdir(user_path + sep + 'Desktop'):
+                    user_path = dirname(user_path)
+                user_path = user_path + sep + 'Documents'
+            else:
+                user_path = expanduser('~') + sep + 'Documents'
             browser = FileBrowser(select_string='Select',
                                   favorites=[(user_path, 'Documents')])
             browser.bind(on_success=self._fbrowser_success,
-                         on_canceled=self._fbrowser_canceled,
-                         on_submit=self._fbrowser_submit)
+                        on_canceled=self._fbrowser_canceled,
+                        on_submit=self._fbrowser_submit)
             return browser
 
         def _fbrowser_canceled(self, instance):
